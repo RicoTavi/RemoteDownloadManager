@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}Download Queue - Remote Download Manager{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>📥 Download Queue</h2>
+    <div class="actions">
+        <button onclick="triggerDownload()" class="btn btn-success" {% if not queue %}disabled{% endif %}>
+            🚀 Start Download
+        </button>
+        <button onclick="clearQueue()" class="btn btn-danger" {% if not queue %}disabled{% endif %}>
+            🗑️ Clear Queue
+        </button>
+    </div>
+</div>
+
+{% if not queue %}
+<div class="empty-state">
+    <h3>📭 Queue is Empty</h3>
+    <p>No files queued for download.</p>
+    <a href="{{ url_for('index') }}" class="btn btn-primary">📁 Browse Files</a>
+</div>
+{% else %}
+<div class="queue-info">
+    <p><strong>{{ queue|length }}</strong> file(s) queued for download</p>
+    <p>Files will be downloaded to the destination you select when clicking "Start Download"</p>
+</div>
+
+<div class="file-list">
+    <table>
+        <thead>
+            <tr>
+                <th width="50"></th>
+                <th>Filename</th>
+                <th>Size</th>
+                <th>Destination</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in queue %}
+            <tr data-download-id="{{ item.download_id }}">
+                <td class="emoji">{{ item.emoji }}</td>
+                <td class="filename">
+                    <strong>{{ item.filename }}</strong>
+                    <div class="file-path">{{ item.remote_path }}</div>
+                    {% if item.notes %}
+                    <div class="file-note">📝 {{ item.notes }}</div>
+                    {% endif %}
+                </td>
+                <td>{{ item.size }}</td>
+                <td>
+                    {% if item.local_path %}
+                    <span class="path-text">{{ item.local_path }}</span>
+                    {% else %}
+                    <span class="text-muted">Will be selected on download</span>
+                    {% endif %}
+                </td>
+                <td class="actions-cell">
+                    <button onclick="removeFromQueue({{ item.download_id }})"
+                            class="btn-small btn-danger" title="Remove from queue">🗑️</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- Download Dialog -->
+<div id="download-dialog" class="modal">
+    <div class="modal-content">
+        <h3>🚀 Start Download</h3>
+        <p>The download script will run in the background on your NAS.</p>
+        <p>You can close this browser window - downloads will continue.</p>
+        <p>Check your NAS terminal or logs for progress.</p>
+        <div class="modal-actions">
+            <button onclick="confirmDownload()" class="btn btn-success">Start Download</button>
+            <button onclick="closeDialog('download-dialog')" class="btn btn-secondary">Cancel</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Remove file from queue
+    async function removeFromQueue(downloadId) {
+        if (!confirm('Remove this file from the queue?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/queue/remove/${downloadId}`, {
+                method: 'POST'
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showNotification('✅ Removed from queue', 'success');
+                // Remove row from table
+                document.querySelector(`tr[data-download-id="${downloadId}"]`).remove();
+
+                // Reload if empty
+                const tbody = document.querySelector('tbody');
+                if (tbody.children.length === 0) {
+                    location.reload();
+                }
+
+                loadStats();
+            } else {
+                showNotification(`❌ ${result.message}`, 'error');
+            }
+        } catch (error) {
+            showNotification('Failed to remove from queue', 'error');
+        }
+    }
+
+    // Clear entire queue
+    async function clearQueue() {
+        if (!confirm('Clear the entire download queue?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/queue/clear', {
+                method: 'POST'
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showNotification('✅ Queue cleared', 'success');
+                location.reload();
+            } else {
+                showNotification(`❌ ${result.message}`, 'error');
+            }
+        } catch (error) {
+            showNotification('Failed to clear queue', 'error');
+        }
+    }
+
+    // Trigger download
+    function triggerDownload() {
+        document.getElementById('download-dialog').classList.add('show');
+    }
+
+    // Confirm and start download
+    async function confirmDownload() {
+        try {
+            const response = await fetch('/api/download/trigger', {
+                method: 'POST'
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showNotification('✅ Download started! Check NAS terminal for progress.', 'success');
+                closeDialog('download-dialog');
+
+                // Redirect to files page after a moment
+                setTimeout(() => {
+                    window.location.href = "{{ url_for('index') }}";
+                }, 2000);
+            } else {
+                showNotification(`❌ ${result.message}`, 'error');
+            }
+        } catch (error) {
+            showNotification('Failed to start download', 'error');
+        }
+    }
+
+    // Close dialog
+    function closeDialog(dialogId) {
+        document.getElementById(dialogId).classList.remove('show');
+    }
+
+    // Close dialog on background click
+    document.querySelectorAll('.modal').forEach(modal => {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.classList.remove('show');
+            }
+        });
+    });
+</script>
+{% endblock %}

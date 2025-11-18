@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Remote Download Manager{% endblock %}</title>
+
+    <!-- DataTables CSS -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/colreorder/1.7.0/css/colReorder.dataTables.min.css">
+
+    <!-- Custom styles -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+    <!-- jQuery (required for DataTables) -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+    <!-- DataTables JS -->
+    <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/colreorder/1.7.0/js/dataTables.colReorder.min.js"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>🚀 Remote Server Download Manager 📥</h1>
+            <nav>
+                <a href="{{ url_for('index') }}" class="nav-link">📁 Files</a>
+                <a href="{{ url_for('queue_page') }}" class="nav-link">📥 Queue <span id="queue-count" class="badge">0</span></a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <div class="container">
+            <div class="stats" id="stats">
+                <span>📊 Total Files: <strong id="total-files">-</strong></span>
+                <span>📥 Queued: <strong id="queued-files">-</strong></span>
+                <span>✅ Completed: <strong id="completed-files">-</strong></span>
+                <span>💾 Total Size: <strong id="total-size">-</strong></span>
+            </div>
+        </div>
+    </footer>
+
+    <div id="notification" class="notification"></div>
+
+    <script>
+        // Load stats
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const stats = await response.json();
+
+                document.getElementById('total-files').textContent = stats.total_files;
+                document.getElementById('queued-files').textContent = stats.queued_files;
+                document.getElementById('completed-files').textContent = stats.completed_downloads;
+                document.getElementById('total-size').textContent = stats.total_size;
+                document.getElementById('queue-count').textContent = stats.queued_files;
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        }
+
+        // Show notification
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type} show`;
+
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
+
+        // Load stats on page load and every 10 seconds
+        loadStats();
+        setInterval(loadStats, 10000);
+    </script>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,39 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.class
+*.so
+
+# Cache directory
+.cache/
+*.cache
+
+# Logs
+logs/
+*.log
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.part*
+
+# Environment files (if any)
+.env
+.venv/
+venv/

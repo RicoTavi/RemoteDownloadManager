@@ -1,0 +1,425 @@
+{% extends "base.html" %}
+
+{% block title %}File Browser - Remote Download Manager{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>📁 Remote File Browser</h2>
+    <div class="actions">
+        <button onclick="showScanDialog()" class="btn btn-primary">🔄 Scan Remote</button>
+        <button onclick="queueSelected()" class="btn btn-success" id="queue-btn" disabled>
+            📥 Queue Selected (<span id="selected-count">0</span>)
+        </button>
+    </div>
+</div>
+
+<div class="search-bar">
+    <input type="text" id="search-input" placeholder="🔍 Search files...">
+    <select id="status-filter">
+        <option value="">All Status</option>
+        <option value="queued">Queued</option>
+        <option value="completed">Completed</option>
+        <option value="failed">Failed</option>
+        <option value="-">Not Downloaded</option>
+    </select>
+</div>
+
+<div class="file-list" id="file-list">
+    <table id="files-table" class="display">
+        <thead>
+            <tr>
+                <th data-orderable="false"><input type="checkbox" id="select-all" onchange="toggleSelectAll()"></th>
+                <th data-orderable="false"></th>
+                <th>Filename</th>
+                <th>Size</th>
+                <th>Added to Server</th>
+                <th>Status</th>
+                <th data-orderable="false">Destination</th>
+                <th data-orderable="false">Actions</th>
+            </tr>
+        </thead>
+        <tbody id="file-table-body">
+            {% for file in files %}
+            <tr data-file-id="{{ file.id }}" data-status="{{ file.status }}">
+                <td><input type="checkbox" class="file-checkbox" value="{{ file.id }}"></td>
+                <td class="emoji">{{ file.emoji }}</td>
+                <td class="filename">
+                    <strong>{{ file.filename }}</strong>
+                    <div class="file-path">{{ file.remote_path }}</div>
+                    {% if file.notes %}
+                    <div class="file-note">📝 {{ file.notes }}</div>
+                    {% endif %}
+                    {% if file.source %}
+                    <div class="file-source">🔗 Source: {{ file.source }}</div>
+                    {% endif %}
+                </td>
+                <td>{{ file.size }}</td>
+                <td><span class="date-text">{{ file.server_added or 'N/A' }}</span></td>
+                <td><span class="status-badge status-{{ file.status }}">{{ file.status }}</span></td>
+                <td>
+                    <select class="destination-select" data-file-id="{{ file.id }}">
+                        <option value="">Default</option>
+                        {% if config.DOWNLOAD_PATH_1 %}
+                        <option value="{{ config.DOWNLOAD_PATH_1 }}">{{ config.PATH_1_NAME or 'Path 1' }}</option>
+                        {% endif %}
+                        {% if config.DOWNLOAD_PATH_2 %}
+                        <option value="{{ config.DOWNLOAD_PATH_2 }}">{{ config.PATH_2_NAME or 'Path 2' }}</option>
+                        {% endif %}
+                        {% if config.DOWNLOAD_PATH_3 %}
+                        <option value="{{ config.DOWNLOAD_PATH_3 }}">{{ config.PATH_3_NAME or 'Path 3' }}</option>
+                        {% endif %}
+                        {% if config.DOWNLOAD_PATH_4 %}
+                        <option value="{{ config.DOWNLOAD_PATH_4 }}">{{ config.PATH_4_NAME or 'Path 4' }}</option>
+                        {% endif %}
+                        {% if config.DOWNLOAD_PATH_5 %}
+                        <option value="{{ config.DOWNLOAD_PATH_5 }}">{{ config.PATH_5_NAME or 'Path 5' }}</option>
+                        {% endif %}
+                    </select>
+                </td>
+                <td class="actions-cell">
+                    <button onclick="showNoteDialog({{ file.id }}, '{{ file.filename }}', '{{ file.notes or '' }}')"
+                            class="btn-small btn-info" title="Add/Edit Note">📝</button>
+                    <button onclick="showSourceDialog({{ file.id }}, '{{ file.filename }}')"
+                            class="btn-small btn-info" title="Link Source">🔗</button>
+                    <button onclick="queueSingle({{ file.id }})"
+                            class="btn-small btn-success" title="Queue for Download">➕</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Scan Dialog -->
+<div id="scan-dialog" class="modal">
+    <div class="modal-content">
+        <h3>🔄 Scan Remote Directory</h3>
+        <p>This will scan the remote server and update the database with current files.</p>
+        <input type="text" id="scan-path" placeholder="Optional: specific path (leave empty for default)">
+        <div class="modal-actions">
+            <button onclick="startScan()" class="btn btn-primary">Start Scan</button>
+            <button onclick="closeDialog('scan-dialog')" class="btn btn-secondary">Cancel</button>
+        </div>
+        <div id="scan-status" class="scan-status"></div>
+    </div>
+</div>
+
+<!-- Note Dialog -->
+<div id="note-dialog" class="modal">
+    <div class="modal-content">
+        <h3>📝 Add/Edit Note</h3>
+        <p id="note-filename"></p>
+        <textarea id="note-text" rows="4" placeholder="Enter your notes here..."></textarea>
+        <input type="hidden" id="note-file-id">
+        <div class="modal-actions">
+            <button onclick="saveNote()" class="btn btn-primary">Save Note</button>
+            <button onclick="closeDialog('note-dialog')" class="btn btn-secondary">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Source Dialog -->
+<div id="source-dialog" class="modal">
+    <div class="modal-content">
+        <h3>🔗 Link Source File</h3>
+        <p id="source-filename"></p>
+        <input type="text" id="source-path" placeholder="Path to source file">
+        <textarea id="source-notes" rows="2" placeholder="Optional notes about source"></textarea>
+        <input type="hidden" id="source-file-id">
+        <div class="modal-actions">
+            <button onclick="saveSource()" class="btn btn-primary">Link Source</button>
+            <button onclick="closeDialog('source-dialog')" class="btn btn-secondary">Cancel</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Toggle select all
+    function toggleSelectAll() {
+        const selectAll = document.getElementById('select-all');
+        const checkboxes = document.querySelectorAll('.file-checkbox');
+        checkboxes.forEach(cb => cb.checked = selectAll.checked);
+        updateSelectedCount();
+    }
+
+    // Update selected count
+    function updateSelectedCount() {
+        const selected = document.querySelectorAll('.file-checkbox:checked').length;
+        document.getElementById('selected-count').textContent = selected;
+        document.getElementById('queue-btn').disabled = selected === 0;
+    }
+
+    // Add event listeners to checkboxes (will be re-attached by DataTable)
+    document.querySelectorAll('.file-checkbox').forEach(cb => {
+        cb.addEventListener('change', updateSelectedCount);
+    });
+
+    // Queue selected files
+    async function queueSelected() {
+        const selectedCheckboxes = document.querySelectorAll('.file-checkbox:checked');
+
+        if (selectedCheckboxes.length === 0) {
+            showNotification('No files selected', 'warning');
+            return;
+        }
+
+        // Collect file IDs and their destinations
+        const file_ids = [];
+        const destinations = {};
+
+        selectedCheckboxes.forEach(cb => {
+            const fileId = parseInt(cb.value);
+            file_ids.push(fileId);
+
+            // Find the destination select for this row
+            const row = cb.closest('tr');
+            const destSelect = row.querySelector('.destination-select');
+            if (destSelect && destSelect.value) {
+                destinations[fileId] = destSelect.value;
+            }
+        });
+
+        try {
+            const response = await fetch('/api/queue/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    file_ids: file_ids,
+                    destinations: destinations
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showNotification(`✅ ${result.message}`, 'success');
+                loadStats();
+                // Uncheck all
+                document.getElementById('select-all').checked = false;
+                toggleSelectAll();
+            } else {
+                showNotification(`❌ ${result.message}`, 'error');
+            }
+        } catch (error) {
+            showNotification('Failed to queue files', 'error');
+        }
+    }
+
+    // Queue single file
+    async function queueSingle(fileId) {
+        try {
+            const response = await fetch('/api/queue/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_ids: [fileId] })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showNotification('✅ File queued', 'success');
+                loadStats();
+            } else {
+                showNotification(`❌ ${result.message}`, 'error');
+            }
+        } catch (error) {
+            showNotification('Failed to queue file', 'error');
+        }
+    }
+
+    // Show scan dialog
+    function showScanDialog() {
+        document.getElementById('scan-dialog').classList.add('show');
+        document.getElementById('scan-status').innerHTML = '';
+    }
+
+    // Start scan
+    async function startScan() {
+        const path = document.getElementById('scan-path').value;
+        const statusDiv = document.getElementById('scan-status');
+
+        statusDiv.innerHTML = '<div class="loading">🔄 Scanning remote server...</div>';
+
+        try {
+            const response = await fetch('/api/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: path })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                statusDiv.innerHTML = `<div class="success">✅ ${result.message}</div>`;
+                setTimeout(() => {
+                    closeDialog('scan-dialog');
+                    location.reload();
+                }, 2000);
+            } else {
+                statusDiv.innerHTML = `<div class="error">❌ ${result.message}</div>`;
+            }
+        } catch (error) {
+            statusDiv.innerHTML = '<div class="error">❌ Scan failed</div>';
+        }
+    }
+
+    // Show note dialog
+    function showNoteDialog(fileId, filename, currentNote) {
+        document.getElementById('note-file-id').value = fileId;
+        document.getElementById('note-filename').textContent = `File: ${filename}`;
+        document.getElementById('note-text').value = currentNote;
+        document.getElementById('note-dialog').classList.add('show');
+    }
+
+    // Save note
+    async function saveNote() {
+        const fileId = document.getElementById('note-file-id').value;
+        const noteText = document.getElementById('note-text').value;
+
+        try {
+            const response = await fetch('/api/note/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_id: fileId, note: noteText })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showNotification('✅ Note saved', 'success');
+                closeDialog('note-dialog');
+                location.reload();
+            } else {
+                showNotification(`❌ ${result.message}`, 'error');
+            }
+        } catch (error) {
+            showNotification('Failed to save note', 'error');
+        }
+    }
+
+    // Show source dialog
+    function showSourceDialog(fileId, filename) {
+        document.getElementById('source-file-id').value = fileId;
+        document.getElementById('source-filename').textContent = `File: ${filename}`;
+        document.getElementById('source-path').value = '';
+        document.getElementById('source-notes').value = '';
+        document.getElementById('source-dialog').classList.add('show');
+    }
+
+    // Save source
+    async function saveSource() {
+        const fileId = document.getElementById('source-file-id').value;
+        const sourcePath = document.getElementById('source-path').value;
+        const sourceNotes = document.getElementById('source-notes').value;
+
+        if (!sourcePath) {
+            showNotification('Please enter a source path', 'warning');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/source/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    file_id: fileId,
+                    source_path: sourcePath,
+                    source_notes: sourceNotes
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showNotification('✅ Source file linked', 'success');
+                closeDialog('source-dialog');
+                location.reload();
+            } else {
+                showNotification(`❌ ${result.message}`, 'error');
+            }
+        } catch (error) {
+            showNotification('Failed to link source', 'error');
+        }
+    }
+
+    // Close dialog
+    function closeDialog(dialogId) {
+        document.getElementById(dialogId).classList.remove('show');
+    }
+
+    // Close dialogs on background click
+    document.querySelectorAll('.modal').forEach(modal => {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.classList.remove('show');
+            }
+        });
+    });
+
+    // Initialize DataTable
+    $(document).ready(function() {
+        const table = $('#files-table').DataTable({
+            order: [[4, 'desc']],  // Sort by "Added to Server" column (newest first)
+            pageLength: 50,         // Show 50 rows by default
+            lengthMenu: [[25, 50, 100, 250, -1], [25, 50, 100, 250, "All"]],
+            colReorder: true,       // Enable column reordering
+            stateSave: true,        // Remember sort/page between sessions
+            columnDefs: [
+                {
+                    targets: [0, 1, 6, 7],  // Checkbox, emoji, destination, and actions columns
+                    orderable: false
+                },
+                {
+                    targets: 3,  // Size column
+                    type: 'file-size',
+                    orderData: [3]
+                }
+            ],
+            language: {
+                search: "🔍 Search:",
+                lengthMenu: "Show _MENU_ files",
+                info: "Showing _START_ to _END_ of _TOTAL_ files",
+                infoEmpty: "No files found",
+                infoFiltered: "(filtered from _MAX_ total files)",
+                paginate: {
+                    first: "⏮️ First",
+                    last: "⏭️ Last",
+                    next: "▶️",
+                    previous: "◀️"
+                }
+            }
+        });
+
+        // Custom sorting for file sizes
+        $.fn.dataTable.ext.type.order['file-size-pre'] = function(data) {
+            const units = {'B': 1, 'KB': 1024, 'MB': 1048576, 'GB': 1073741824, 'TB': 1099511627776};
+            const match = data.match(/^([\d.]+)\s*([A-Z]+)$/);
+            if (match) {
+                return parseFloat(match[1]) * units[match[2]];
+            }
+            return 0;
+        };
+
+        // Re-attach event listeners after DataTable sorts/pages
+        table.on('draw', function() {
+            document.querySelectorAll('.file-checkbox').forEach(cb => {
+                cb.removeEventListener('change', updateSelectedCount);
+                cb.addEventListener('change', updateSelectedCount);
+            });
+            updateSelectedCount();
+        });
+
+        // Use DataTable's built-in search instead of custom search
+        $('#search-input').on('keyup', function() {
+            table.search(this.value).draw();
+        });
+
+        // Status filter
+        $('#status-filter').on('change', function() {
+            table.column(5).search(this.value).draw();
+        });
+    });
+</script>
+{% endblock %}
