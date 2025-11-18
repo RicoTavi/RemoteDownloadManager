@@ -10,6 +10,7 @@ import time
 import json
 import pickle
 import hashlib
+import csv
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
@@ -625,6 +626,7 @@ class DownloadManager:
             self.console.print("  • Enter number to select")
             self.console.print("  • Multiple files: [cyan]1,3,5[/cyan] or [cyan]2-6[/cyan]")
             self.console.print("  • Type [cyan]'all'[/cyan] to select all files")
+            self.console.print("  • Type [cyan]'e'[/cyan] to export directory to CSV")
             self.console.print("  • Type [cyan]'r'[/cyan] to refresh directory listing")
 
             # Show folder sizes status and toggle option
@@ -648,6 +650,10 @@ class DownloadManager:
                 self.current_path = self.base_path
             elif choice.lower() == 'r':
                 force_refresh = True
+                continue
+            elif choice.lower() == 'e':
+                # Export to CSV
+                self.export_to_csv(files)
                 continue
             elif choice.lower() == 'f':
                 # Toggle folder sizes
@@ -706,6 +712,67 @@ class DownloadManager:
                     selected.append(files[idx - 1])
 
         return selected
+
+    def export_to_csv(self, files: List[Dict]):
+        """Export current directory listing to CSV file"""
+        self.show_banner()
+
+        # Create exports directory
+        exports_dir = self.script_dir / 'exports'
+        exports_dir.mkdir(exist_ok=True)
+
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        folder_name = Path(self.current_path).name or 'root'
+        csv_filename = f"directory_listing_{folder_name}_{timestamp}.csv"
+        csv_path = exports_dir / csv_filename
+
+        self.console.print(f"[cyan]📊 Exporting directory listing...[/cyan]\n")
+        self.console.print(f"[cyan]Current Directory: [bold]{self.current_path}[/bold][/cyan]")
+        self.console.print(f"[cyan]Total Items: [bold]{len(files)}[/bold][/cyan]\n")
+
+        # Write CSV
+        try:
+            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+
+                # Write header
+                writer.writerow(['Number', 'Name', 'Type', 'Size', 'Size (Bytes)', 'Full Path', 'Modified'])
+
+                # Write data
+                for idx, file_info in enumerate(files, 1):
+                    file_type = 'Folder' if file_info['is_dir'] else 'File'
+                    size_bytes = file_info['size']
+                    size_human = self.format_size(size_bytes) if not file_info['is_dir'] else ''
+                    full_path = os.path.join(self.current_path, file_info['name'])
+                    modified = datetime.fromtimestamp(file_info['mtime']).strftime('%Y-%m-%d %H:%M:%S')
+
+                    writer.writerow([
+                        idx,
+                        file_info['name'],
+                        file_type,
+                        size_human,
+                        size_bytes if not file_info['is_dir'] else '',
+                        full_path,
+                        modified
+                    ])
+
+            self.console.print(f"[green]✅ Export successful![/green]")
+            self.console.print(f"[green]📄 File saved to:[/green]")
+            self.console.print(f"[cyan]   {csv_path}[/cyan]\n")
+
+            self.console.print("[yellow]💡 Tip:[/yellow]")
+            self.console.print("[dim]   • Open the CSV to browse the directory on another screen[/dim]")
+            self.console.print("[dim]   • Note the numbers of files you want to download[/dim]")
+            self.console.print("[dim]   • Return here and enter those numbers (e.g., 5,12,18-22)[/dim]")
+
+            self.log(f"EXPORT: Exported directory listing to {csv_path}")
+
+        except Exception as e:
+            self.console.print(f"[red]❌ Export failed: {e}[/red]")
+            self.log(f"EXPORT FAILED: {e}")
+
+        input("\nPress Enter to continue...")
 
     def download_files(self, files: List[Dict]):
         """Download selected files"""

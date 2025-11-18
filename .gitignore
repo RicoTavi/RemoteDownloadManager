@@ -37,3 +37,7 @@ Thumbs.db
 .env
 .venv/
 venv/
+
+# Exports
+exports/
+*.csv
