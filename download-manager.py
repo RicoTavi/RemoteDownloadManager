@@ -874,13 +874,8 @@ class DownloadManager:
             ]
 
             try:
-                # Run rsync with real-time output
-                result = subprocess.run(
-                    rsync_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True
-                )
+                # Run rsync with real-time output (no capture, displays directly)
+                result = subprocess.run(rsync_cmd)
 
                 if result.returncode == 0:
                     # Check if file was downloaded
