@@ -1160,6 +1160,19 @@ def export_cli(app: 'DownloadManager', remote_path: str, output_dir: Optional[st
 
         console.print(f"[green]✅ Found {len(files)} items[/green]\n")
 
+        # Calculate folder sizes
+        has_dirs = any(f['is_dir'] for f in files)
+        folder_sizes = {}
+
+        if has_dirs:
+            console.print(f"[cyan]📊 Calculating folder sizes...[/cyan]")
+            for file_info in files:
+                if file_info['is_dir']:
+                    dir_path = os.path.join(remote_path, file_info['name'])
+                    dir_size = app.sftp.get_directory_size(dir_path)
+                    folder_sizes[file_info['name']] = dir_size
+            console.print(f"[green]✅ Folder sizes calculated[/green]\n")
+
         # Determine output directory
         if output_dir:
             exports_dir = Path(output_dir)
@@ -1174,7 +1187,7 @@ def export_cli(app: 'DownloadManager', remote_path: str, output_dir: Optional[st
         csv_filename = f"directory_listing_{folder_name}_{timestamp}.csv"
         csv_path = exports_dir / csv_filename
 
-        console.print(f"[cyan]📊 Exporting to CSV...[/cyan]")
+        console.print(f"[cyan]📝 Writing to CSV...[/cyan]")
 
         # Write CSV
         with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
@@ -1183,8 +1196,15 @@ def export_cli(app: 'DownloadManager', remote_path: str, output_dir: Optional[st
 
             for idx, file_info in enumerate(files, 1):
                 file_type = 'Folder' if file_info['is_dir'] else 'File'
-                size_bytes = file_info['size']
-                size_human = app.format_size(size_bytes) if not file_info['is_dir'] else ''
+
+                # Use calculated folder size or file size
+                if file_info['is_dir']:
+                    size_bytes = folder_sizes.get(file_info['name'], 0)
+                    size_human = app.format_size(size_bytes) if size_bytes > 0 else ''
+                else:
+                    size_bytes = file_info['size']
+                    size_human = app.format_size(size_bytes)
+
                 full_path = os.path.join(remote_path, file_info['name'])
                 modified = datetime.fromtimestamp(file_info['mtime']).strftime('%Y-%m-%d %H:%M:%S')
 
@@ -1193,7 +1213,7 @@ def export_cli(app: 'DownloadManager', remote_path: str, output_dir: Optional[st
                     file_info['name'],
                     file_type,
                     size_human,
-                    size_bytes if not file_info['is_dir'] else '',
+                    size_bytes if size_bytes > 0 else '',
                     full_path,
                     modified
                 ])
