@@ -11,6 +11,7 @@ import json
 import pickle
 import hashlib
 import csv
+import subprocess
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
@@ -833,58 +834,75 @@ class DownloadManager:
         # Download files
         self.show_banner()
         self.console.print(f"[cyan]Source: [bold]{self.current_path}[/bold][/cyan]")
-        self.console.print(f"[cyan]Destination: [bold]{dest_path}[/bold][/cyan]\n")
+        self.console.print(f"[cyan]Destination: [bold]{dest_path}[/bold][/cyan]")
+        self.console.print(f"[cyan]Method: [bold]rsync (SSH)[/bold][/cyan]\n")
 
         success_count = 0
         fail_count = 0
 
+        # Get SSH connection details
+        remote_host = self.config.get('REMOTE_HOST')
+        remote_user = self.config.get('REMOTE_USER')
+        ssh_key = self.config.get('SSH_KEY_PATH')
+
         for file_info in files:
             remote_file = os.path.join(self.current_path, file_info['name'])
-            local_file = os.path.join(dest_path, file_info['name'])
 
             emoji = self.get_file_emoji(file_info['name'])
             self.console.print(f"\n[blue]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/blue]")
             self.console.print(f"[blue]📥 Downloading: {emoji} [bold]{file_info['name']}[/bold][/blue]")
 
-            # Get file size and chunk config
-            file_size = self.sftp.get_file_size(remote_file)
-            chunks = self.config.get_int('DOWNLOAD_CHUNKS', 8)
-            
-            if file_size:
-                self.console.print(f"[cyan]   📊 File Size: [bold]{self.format_size(file_size)}[/bold][/cyan]")
-                if file_size >= 10 * 1024 * 1024:  # 10MB+
-                    self.console.print(f"[cyan]   🚀 Using {chunks} parallel chunks (IDM-style)[/cyan]")
+            # Show file size if available
+            if not file_info['is_dir'] and file_info['size']:
+                self.console.print(f"[cyan]   📊 File Size: [bold]{self.format_size(file_info['size'])}[/bold][/cyan]")
 
             self.console.print(f"[yellow]   ⏳ Transfer in progress...[/yellow]\n")
 
-            # Download with progress bar
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                TransferSpeedColumn(),
-                TimeRemainingColumn(),
-                console=self.console
-            ) as progress:
-                task = progress.add_task(f"Downloading {file_info['name']}", total=file_size)
+            # Build rsync command
+            # -a: archive mode (preserves permissions, timestamps, etc.)
+            # -v: verbose
+            # -z: compress during transfer
+            # -P: show progress and allow resume
+            # --info=progress2: better progress display
+            rsync_cmd = [
+                'rsync',
+                '-avzP',
+                '--info=progress2',
+                '-e', f'ssh -i {ssh_key} -o StrictHostKeyChecking=no',
+                f'{remote_user}@{remote_host}:{remote_file}',
+                dest_path + '/'
+            ]
 
-                def callback(transferred, total):
-                    progress.update(task, completed=transferred)
+            try:
+                # Run rsync with real-time output
+                result = subprocess.run(
+                    rsync_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True
+                )
 
-                success = self.sftp.download_file(remote_file, local_file, callback, chunks=chunks)
+                if result.returncode == 0:
+                    # Check if file was downloaded
+                    local_file = os.path.join(dest_path, file_info['name'])
+                    if os.path.exists(local_file):
+                        final_size = Path(local_file).stat().st_size
+                        self.console.print(f"\n[green]✅ ✓ Downloaded: {file_info['name']}[/green]")
+                        self.console.print(f"[green]   💾 Saved: {self.format_size(final_size)} → {local_file}[/green]")
+                        self.log(f"SUCCESS: Downloaded {remote_file} to {local_file}")
+                        success_count += 1
+                    else:
+                        self.console.print(f"\n[red]❌ Failed: {file_info['name']} (file not found after transfer)[/red]")
+                        self.log(f"FAILED: Download of {remote_file} to {local_file}")
+                        fail_count += 1
+                else:
+                    self.console.print(f"\n[red]❌ Failed: {file_info['name']} (rsync error code {result.returncode})[/red]")
+                    self.log(f"FAILED: Download of {remote_file} - rsync error {result.returncode}")
+                    fail_count += 1
 
-            print()  # Extra newline after progress
-
-            if success:
-                final_size = Path(local_file).stat().st_size
-                self.console.print(f"[green]✅ ✓ Downloaded: {file_info['name']}[/green]")
-                self.console.print(f"[green]   💾 Saved: {self.format_size(final_size)} → {local_file}[/green]")
-                self.log(f"SUCCESS: Downloaded {remote_file} to {local_file}")
-                success_count += 1
-            else:
-                self.console.print(f"[red]❌ Failed: {file_info['name']}[/red]")
-                self.log(f"FAILED: Download of {remote_file} to {local_file}")
+            except Exception as e:
+                self.console.print(f"\n[red]❌ Failed: {file_info['name']} - {e}[/red]")
+                self.log(f"FAILED: Download of {remote_file} - {e}")
                 fail_count += 1
 
         # Summary
