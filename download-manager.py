@@ -826,11 +826,13 @@ class DownloadManager:
                 return
 
         # Create subdirectory based on current remote folder name
-        current_folder_name = Path(self.current_path).name
-        if current_folder_name:  # Only create subdirectory if we have a folder name
-            dest_path_obj = dest_path_obj / current_folder_name
-            dest_path_obj.mkdir(parents=True, exist_ok=True)
-            dest_path = str(dest_path_obj)
+        # Only if we're browsing deeper than the base directory
+        if self.current_path != self.base_path:
+            current_folder_name = Path(self.current_path).name
+            if current_folder_name:
+                dest_path_obj = dest_path_obj / current_folder_name
+                dest_path_obj.mkdir(parents=True, exist_ok=True)
+                dest_path = str(dest_path_obj)
 
         # Download files
         self.show_banner()
