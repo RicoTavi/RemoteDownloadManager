@@ -41,3 +41,6 @@ venv/
 # Exports
 exports/
 *.csv
+
+# Conversation logs
+conversation/
