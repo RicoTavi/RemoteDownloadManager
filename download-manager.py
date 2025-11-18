@@ -12,6 +12,7 @@ import pickle
 import hashlib
 import csv
 import subprocess
+import argparse
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
@@ -1088,6 +1089,30 @@ class DownloadManager:
 
 def main():
     """Entry point"""
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description='Remote Server Download Manager',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  dm                                    Launch interactive interface
+  dm --export /remote/path              Export directory listing to CSV
+  dm --export /remote/path --output ./  Save CSV to specific location
+        '''
+    )
+    parser.add_argument(
+        '--export',
+        metavar='PATH',
+        help='Export directory listing to CSV (non-interactive)'
+    )
+    parser.add_argument(
+        '--output',
+        metavar='DIR',
+        help='Output directory for CSV export (default: exports/)'
+    )
+
+    args = parser.parse_args()
+
     script_dir = Path(__file__).parent
     config_file = script_dir / "config.conf"
 
@@ -1098,7 +1123,88 @@ def main():
         sys.exit(1)
 
     app = DownloadManager(str(config_file))
-    app.run()
+
+    # Handle non-interactive export mode
+    if args.export:
+        export_cli(app, args.export, args.output)
+    else:
+        # Normal interactive mode
+        app.run()
+
+
+def export_cli(app: 'DownloadManager', remote_path: str, output_dir: Optional[str] = None):
+    """Non-interactive CSV export"""
+    console = Console()
+
+    console.print(f"[cyan]🔗 Connecting to {app.config.get('REMOTE_USER')}@{app.config.get('REMOTE_HOST')}...[/cyan]")
+
+    # Connect to SFTP
+    if not app.sftp.connect():
+        console.print("[red]❌ Connection failed![/red]")
+        sys.exit(1)
+
+    console.print("[green]✅ Connected![/green]\n")
+
+    try:
+        # Set the path to export
+        app.current_path = remote_path
+
+        console.print(f"[cyan]📂 Scanning directory: [bold]{remote_path}[/bold][/cyan]")
+
+        # Get directory listing
+        files = app.sftp.list_directory(remote_path)
+
+        if not files:
+            console.print("[yellow]⚠️  No files found or error occurred[/yellow]")
+            sys.exit(1)
+
+        console.print(f"[green]✅ Found {len(files)} items[/green]\n")
+
+        # Determine output directory
+        if output_dir:
+            exports_dir = Path(output_dir)
+        else:
+            exports_dir = app.script_dir / 'exports'
+
+        exports_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        folder_name = Path(remote_path).name or 'root'
+        csv_filename = f"directory_listing_{folder_name}_{timestamp}.csv"
+        csv_path = exports_dir / csv_filename
+
+        console.print(f"[cyan]📊 Exporting to CSV...[/cyan]")
+
+        # Write CSV
+        with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['Number', 'Name', 'Type', 'Size', 'Size (Bytes)', 'Full Path', 'Modified'])
+
+            for idx, file_info in enumerate(files, 1):
+                file_type = 'Folder' if file_info['is_dir'] else 'File'
+                size_bytes = file_info['size']
+                size_human = app.format_size(size_bytes) if not file_info['is_dir'] else ''
+                full_path = os.path.join(remote_path, file_info['name'])
+                modified = datetime.fromtimestamp(file_info['mtime']).strftime('%Y-%m-%d %H:%M:%S')
+
+                writer.writerow([
+                    idx,
+                    file_info['name'],
+                    file_type,
+                    size_human,
+                    size_bytes if not file_info['is_dir'] else '',
+                    full_path,
+                    modified
+                ])
+
+        console.print(f"[green]✅ Export successful![/green]")
+        console.print(f"[green]📄 Saved to: [bold]{csv_path}[/bold][/green]")
+
+        app.log(f"CLI EXPORT: {remote_path} -> {csv_path}")
+
+    finally:
+        app.sftp.disconnect()
 
 
 if __name__ == "__main__":
